@@ -71,6 +71,10 @@ pub enum Sdk {
 		#[clap(long)]
 		force: bool,
 
+		#[clap(long)]
+		/// Repository override
+		repository: Option<String>,
+
 		/// Path to install
 		path: Option<PathBuf>,
 	},
@@ -83,6 +87,9 @@ pub enum Sdk {
 		/// Specify version to install
 		#[clap(long, short)]
 		version: Option<String>,
+		#[clap(long)]
+		/// Repository override
+		repository: Option<String>,
 	},
 
 	/// Uninstall SDK
@@ -347,7 +354,7 @@ fn clone_repo(url: &str, into: &Path) -> Result<Repository, git2::Error> {
 	builder.clone(url, into)
 }
 
-fn install(config: &mut Config, path: PathBuf, force: bool) {
+fn install(config: &mut Config, path: PathBuf, repository: Option<String>, force: bool) {
 	let path = path.absolutize().nice_unwrap("Failed to get absolute path");
 	let parent = path.parent().unwrap();
 
@@ -376,7 +383,12 @@ fn install(config: &mut Config, path: PathBuf, force: bool) {
 
 	info!("Downloading SDK");
 
-	let repo = clone_repo("https://github.com/geode-sdk/geode", &path)
+	let repository = repository
+		.as_deref()
+		.unwrap_or("geode-sdk/geode")
+		.to_lowercase();
+
+	let repo = clone_repo(format!("https://github.com/{}", repository).as_str(), &path)
 		.nice_unwrap("Could not download SDK");
 
 	// set GEODE_SDK environment variable;
@@ -557,7 +569,12 @@ fn switch_to_tag(config: &mut Config, repo: &Repository) {
 	done!("Updated head to v{}", latest_version.unwrap());
 }
 
-fn install_binaries(config: &mut Config, platform: Option<String>, version: Option<String>) {
+fn install_binaries(
+	config: &mut Config,
+	platform: Option<String>,
+	version: Option<String>,
+	repository: Option<String>,
+) {
 	let release_tag: String;
 	let target_dir: PathBuf;
 	if config.sdk_nightly {
@@ -589,10 +606,15 @@ fn install_binaries(config: &mut Config, platform: Option<String>, version: Opti
 		target_dir = Config::sdk_path().join(format!("bin/{}", stripped_ver));
 	}
 
+	let repository = repository
+		.as_deref()
+		.unwrap_or("geode-sdk/geode")
+		.to_lowercase();
+
 	let res = reqwest::blocking::Client::new()
 		.get(format!(
-			"https://api.github.com/repos/geode-sdk/geode/releases/tags/{}",
-			release_tag
+			"https://api.github.com/repos/{}/releases/tags/{}",
+			repository, release_tag
 		))
 		.header(USER_AGENT, "github_api/1.0")
 		.header(
@@ -897,6 +919,7 @@ pub fn subcommand(cmd: Sdk) {
 		Sdk::Install {
 			reinstall,
 			force,
+			repository,
 			path,
 		} => {
 			let mut config = Config::new().assert_is_setup();
@@ -944,7 +967,7 @@ pub fn subcommand(cmd: Sdk) {
 				}
 			};
 
-			install(&mut config, actual_path, force);
+			install(&mut config, actual_path, repository, force);
 			config.save();
 		}
 		Sdk::Uninstall => {
@@ -957,9 +980,13 @@ pub fn subcommand(cmd: Sdk) {
 			config.save();
 		}
 		Sdk::Version => info!("Geode SDK version: {}", get_version()),
-		Sdk::InstallBinaries { platform, version } => {
+		Sdk::InstallBinaries {
+			platform,
+			version,
+			repository,
+		} => {
 			let mut config = Config::new().assert_is_setup();
-			install_binaries(&mut config, platform, version);
+			install_binaries(&mut config, platform, version, repository);
 			config.save();
 		}
 
